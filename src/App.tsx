@@ -101,7 +101,7 @@ function Scene() {
       }
     },
     metalColor: {
-      value: "#D8C08C",
+      value: "rgb(216, 192, 140)",
       label: 'Metal',
       options: {
         '14k Yellow Gold': '#D8C08C',
@@ -124,10 +124,10 @@ function Scene() {
     }
   })
 
-  const ringEnv = useLoader(RGBELoader, 'last.hdr')
+  const ringEnv = useLoader(RGBELoader, 'final-7.hdr')
   ringEnv.mapping = THREE.EquirectangularReflectionMapping
 
-  const diamondEnv = useLoader(RGBELoader, 'startup.hdr')
+  const diamondEnv = useLoader(RGBELoader, 'ring-1.hdr')
   diamondEnv.mapping = THREE.EquirectangularReflectionMapping
 
   return (
