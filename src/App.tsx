@@ -1,10 +1,17 @@
 import * as THREE from 'three'
-import { useMemo, Suspense } from 'react'
+import { useMemo, Suspense, useEffect } from 'react'
 import { Canvas, useLoader, type ThreeElements } from '@react-three/fiber'
 import { useGLTF, MeshRefractionMaterial, AccumulativeShadows, RandomizedLight, Environment, OrbitControls, Loader, ContactShadows, Center } from '@react-three/drei'
 import { EffectComposer, Bloom } from '@react-three/postprocessing'
 import { RGBELoader } from 'three-stdlib'
 import { useControls } from 'leva'
+
+// Detect low-end devices once at module load
+const isLowEnd = (() => {
+    const mem = (navigator as any).deviceMemory ?? 8  // GB, undefined on Firefox
+    const cores = navigator.hardwareConcurrency ?? 4
+    return mem <= 4 || cores <= 4
+})()
 
 type RingProps = ThreeElements['group'] & {
     diamondMap: THREE.Texture
@@ -23,7 +30,6 @@ type RingNode = {
 
 function Ring({ diamondMap, glbUrl, metalColor, gemColor, aberration, ...props }: RingProps) {
     const { scene } = useGLTF(glbUrl)
-    console.log(glbUrl)
 
     const { diamonds, metals, autoScale } = useMemo(() => {
         const diamonds: RingNode[] = []
@@ -36,32 +42,18 @@ function Ring({ diamondMap, glbUrl, metalColor, gemColor, aberration, ...props }
             if ((child as THREE.Mesh).isMesh) {
                 const mesh = child as THREE.Mesh
                 const name = mesh.name.toLowerCase()
-
-                // Skip invisible or empty geometry
                 if (!mesh.geometry || (mesh.material && !(mesh.material as THREE.Material).visible)) return
 
-                // Decompose world matrix to get flat transform relative to scene root
                 const pos = new THREE.Vector3()
                 const quat = new THREE.Quaternion()
                 const scale = new THREE.Vector3()
                 mesh.matrixWorld.decompose(pos, quat, scale)
 
-                const item = {
-                    geometry: mesh.geometry,
-                    position: pos,
-                    quaternion: quat,
-                    scale: scale
-                }
+                const item = { geometry: mesh.geometry, position: pos, quaternion: quat, scale }
 
-                if (name.includes('diamond') || name.includes('gem')) {
-                    diamonds.push(item)
-                } else if (name.includes('metal') || name.includes('ring') || name.includes('gold')) {
-                    metals.push(item)
-                } else {
-                    metals.push(item)
-                }
+                if (name.includes('diamond') || name.includes('gem')) diamonds.push(item)
+                else metals.push(item)
 
-                // Expand box only by relevant meshes
                 box.expandByObject(mesh)
             }
         })
@@ -84,22 +76,14 @@ function Ring({ diamondMap, glbUrl, metalColor, gemColor, aberration, ...props }
                                 aberrationStrength={aberration}
                                 toneMapped={true}
                                 color={gemColor}
-                                bounces={3}
+                                bounces={isLowEnd ? 1 : 3}  // ← halved on mobile
                                 ior={2.4}
                                 fresnel={1}
                             />
                         </mesh>
                     ))}
                     {metals.map((m, i) => (
-                        <mesh
-                            key={`metal-${i}`}
-                            castShadow
-                            receiveShadow
-                            geometry={m.geometry}
-                            position={m.position}
-                            quaternion={m.quaternion}
-                            scale={m.scale}
-                        >
+                        <mesh key={`metal-${i}`} castShadow receiveShadow geometry={m.geometry} position={m.position} quaternion={m.quaternion} scale={m.scale}>
                             <meshPhysicalMaterial
                                 color={metalColor}
                                 roughness={0.02}
@@ -107,7 +91,7 @@ function Ring({ diamondMap, glbUrl, metalColor, gemColor, aberration, ...props }
                                 envMapIntensity={1}
                                 clearcoat={1}
                                 clearcoatRoughness={0}
-                                iridescence={0.05}
+                                iridescence={isLowEnd ? 0 : 0.05}  // ← skip on low-end
                                 iridescenceIOR={1.5}
                                 specularIntensity={2}
                                 reflectivity={1}
@@ -119,8 +103,6 @@ function Ring({ diamondMap, glbUrl, metalColor, gemColor, aberration, ...props }
         </group>
     )
 }
-
-
 
 function Scene() {
     const { metalColor, gemColor, aberration, model } = useControls({
@@ -138,22 +120,14 @@ function Scene() {
                 'White Gold': 'rgb(204,204,204)',
             }
         },
-        gemColor: {
-            value: '#ffffff',
-            label: 'Gemstone'
-        },
-        aberration: {
-            value: 0.01,
-            min: 0,
-            max: 0.1,
-            step: 0.01,
-            label: 'Refraction'
-        }
+        gemColor: { value: '#ffffff', label: 'Gemstone' },
+        aberration: { value: 0.01, min: 0, max: 0.1, step: 0.01, label: 'Refraction' }
     })
 
     const ringEnvRaw = useLoader(RGBELoader, 'final-8.hdr')
     const diamondEnvRaw = useLoader(RGBELoader, '6.58.hdr')
 
+    // Clone textures so we can safely mutate mapping (fixes the immutability lint error)
     const ringEnv = useMemo(() => {
         const t = ringEnvRaw.clone()
         t.mapping = THREE.EquirectangularReflectionMapping
@@ -167,6 +141,14 @@ function Scene() {
         t.needsUpdate = true
         return t
     }, [diamondEnvRaw])
+
+    // Dispose clones on unmount to avoid VRAM leaks
+    useEffect(() => {
+        return () => {
+            ringEnv.dispose()
+            diamondEnv.dispose()
+        }
+    }, [ringEnv, diamondEnv])
 
     return (
         <>
@@ -198,27 +180,39 @@ function Scene() {
                         rotation={[0, 0, 0]}
                     />
 
-                    <ContactShadows
-                        resolution={1024}
-                        scale={10}
-                        blur={2}
-                        opacity={0.15}
-                        far={1}
-                        color="#000000"
-                        position={[0, -0.85, 0]}
-                    />
+                    {/* Skip ContactShadows on low-end — it's a render-target shadow pass */}
+                    {!isLowEnd && (
+                        <ContactShadows
+                            resolution={512}          // ← halved from 1024
+                            scale={10}
+                            blur={2}
+                            opacity={0.15}
+                            far={1}
+                            color="#000000"
+                            position={[0, -0.85, 0]}
+                        />
+                    )}
 
                     <group position={[0, -0.85, 0]}>
-                        <AccumulativeShadows temporal frames={100} alphaTest={0.95} opacity={0.6} scale={20}>
-                            <RandomizedLight amount={8} radius={10} ambient={0.5} position={[5, 10, -2.5]} bias={0.001} size={3} />
+                        <AccumulativeShadows
+                            temporal
+                            frames={isLowEnd ? 20 : 100}   // ← 80% fewer frames on mobile
+                            alphaTest={0.95}
+                            opacity={0.6}
+                            scale={20}
+                        >
+                            <RandomizedLight amount={isLowEnd ? 4 : 8} radius={10} ambient={0.5} position={[5, 10, -2.5]} bias={0.001} size={3} />
                         </AccumulativeShadows>
                     </group>
                 </group>
             </Suspense>
 
-            <EffectComposer enableNormalPass={false}>
-                <Bloom luminanceThreshold={1} intensity={0.75} levels={9} mipmapBlur />
-            </EffectComposer>
+            {/* Bloom is expensive — skip entirely on low-end devices */}
+            {!isLowEnd && (
+                <EffectComposer enableNormalPass={false}>
+                    <Bloom luminanceThreshold={1} intensity={0.75} levels={9} mipmapBlur />
+                </EffectComposer>
+            )}
         </>
     )
 }
@@ -229,11 +223,14 @@ export default function App() {
             <Canvas
                 shadows
                 camera={{ position: [5, 3, 5], fov: 35 }}
+                frameloop={isLowEnd ? 'demand' : 'always'}   // ← only render on interaction when idle
                 gl={{
                     toneMapping: THREE.ACESFilmicToneMapping,
                     toneMappingExposure: 1.2,
-                    antialias: true
+                    antialias: !isLowEnd,                     // ← skip MSAA on low-end
+                    powerPreference: 'low-power',             // ← hints GPU driver to use iGPU
                 }}
+                dpr={isLowEnd ? 1 : Math.min(window.devicePixelRatio, 1.5)}  // ← cap pixel ratio
             >
                 <Scene />
             </Canvas>
