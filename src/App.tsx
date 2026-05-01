@@ -23,6 +23,7 @@ type RingNode = {
 
 function Ring({ diamondMap, glbUrl, metalColor, gemColor, aberration, ...props }: RingProps) {
     const { scene } = useGLTF(glbUrl)
+    console.log(glbUrl)
 
     const { diamonds, metals, autoScale } = useMemo(() => {
         const diamonds: RingNode[] = []
@@ -33,6 +34,7 @@ function Ring({ diamondMap, glbUrl, metalColor, gemColor, aberration, ...props }
             if ((child as THREE.Mesh).isMesh) {
                 const mesh = child as THREE.Mesh
                 const name = mesh.name.toLowerCase()
+                console.log("name: ", name)
 
                 // Decompose world matrix to get flat transform relative to scene root
                 const pos = new THREE.Vector3()
@@ -121,7 +123,6 @@ function Scene() {
             options: {
                 'Classic Solitaire': '/ring-1.glb',
                 'Modern Band': '/ring.glb',
-                'Transformed': '/ring-transformed.glb'
             }
         },
         metalColor: {
