@@ -30,11 +30,15 @@ function Ring({ diamondMap, glbUrl, metalColor, gemColor, aberration, ...props }
         const metals: RingNode[] = []
 
         scene.updateWorldMatrix(true, true)
+        const box = new THREE.Box3()
+
         scene.traverse((child) => {
             if ((child as THREE.Mesh).isMesh) {
                 const mesh = child as THREE.Mesh
                 const name = mesh.name.toLowerCase()
-                console.log("name: ", name)
+
+                // Skip invisible or empty geometry
+                if (!mesh.geometry || (mesh.material && !(mesh.material as THREE.Material).visible)) return
 
                 // Decompose world matrix to get flat transform relative to scene root
                 const pos = new THREE.Vector3()
@@ -54,13 +58,14 @@ function Ring({ diamondMap, glbUrl, metalColor, gemColor, aberration, ...props }
                 } else if (name.includes('metal') || name.includes('ring') || name.includes('gold')) {
                     metals.push(item)
                 } else {
-                    // Include other meshes as metal by default if they don't match gem patterns
                     metals.push(item)
                 }
+
+                // Expand box only by relevant meshes
+                box.expandByObject(mesh)
             }
         })
 
-        const box = new THREE.Box3().setFromObject(scene)
         const size = box.getSize(new THREE.Vector3())
         const maxDim = Math.max(size.x, size.y, size.z)
         const autoScale = maxDim > 0 ? 2.5 / maxDim : 1
@@ -147,13 +152,12 @@ function Scene() {
     })
 
     const ringEnv = useLoader(RGBELoader, 'final-8.hdr')
-
     const diamondEnv = useLoader(RGBELoader, '6.58.hdr')
 
-    // eslint-disable-next-line react-hooks/immutability
-    ringEnv.mapping = THREE.EquirectangularReflectionMapping
-    // eslint-disable-next-line react-hooks/immutability
-    diamondEnv.mapping = THREE.EquirectangularReflectionMapping
+    useMemo(() => {
+        ringEnv.mapping = THREE.EquirectangularReflectionMapping
+        diamondEnv.mapping = THREE.EquirectangularReflectionMapping
+    }, [ringEnv, diamondEnv])
 
     return (
         <>
@@ -176,6 +180,7 @@ function Scene() {
             <Suspense fallback={null}>
                 <group position={[0, 0, 0]}>
                     <Ring
+                        key={model}
                         diamondMap={diamondEnv}
                         glbUrl={model}
                         metalColor={metalColor}
