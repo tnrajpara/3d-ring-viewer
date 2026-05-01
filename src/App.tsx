@@ -14,12 +14,19 @@ type RingProps = ThreeElements['group'] & {
     aberration: number
 }
 
+type RingNode = {
+    geometry: THREE.BufferGeometry
+    position: THREE.Vector3
+    quaternion: THREE.Quaternion
+    scale: THREE.Vector3
+}
+
 function Ring({ diamondMap, glbUrl, metalColor, gemColor, aberration, ...props }: RingProps) {
     const { scene } = useGLTF(glbUrl)
 
     const { diamonds, metals, autoScale } = useMemo(() => {
-        const diamonds: any[] = []
-        const metals: any[] = []
+        const diamonds: RingNode[] = []
+        const metals: RingNode[] = []
 
         scene.updateWorldMatrix(true, true)
         scene.traverse((child) => {
@@ -118,14 +125,11 @@ function Scene() {
             }
         },
         metalColor: {
-            value: "#E5C482",
             label: 'Metal',
             options: {
                 '14k Yellow Gold': '#C5A059',
-                'Rose Gold': '#B78A7B',
-                'White Gold': '#E8E8E8',
-                'Platinum': '#F0F0F5',
-                'Silver': '#D1D1D6'
+                'Rose Gold': 'rgb(224,181,158)',
+                'White Gold': 'rgb(204,204,204)',
             }
         },
         gemColor: {
@@ -152,7 +156,7 @@ function Scene() {
 
     return (
         <>
-            <color attach="background" args={['rgb(229, 228,226)']} />
+            <color attach="background" args={['rgb(229,228,226)']} />
             <ambientLight intensity={0.02} />
             <spotLight position={[10, 15, 10]} angle={0.3} penumbra={1} intensity={2} castShadow shadow-bias={-0.0001} />
             <pointLight position={[-10, 10, -10]} intensity={1} color="#ffffff" />
