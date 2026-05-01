@@ -151,13 +151,22 @@ function Scene() {
         }
     })
 
-    const ringEnv = useLoader(RGBELoader, 'final-8.hdr')
-    const diamondEnv = useLoader(RGBELoader, '6.58.hdr')
+    const ringEnvRaw = useLoader(RGBELoader, 'final-8.hdr')
+    const diamondEnvRaw = useLoader(RGBELoader, '6.58.hdr')
 
-    useMemo(() => {
-        ringEnv.mapping = THREE.EquirectangularReflectionMapping
-        diamondEnv.mapping = THREE.EquirectangularReflectionMapping
-    }, [ringEnv, diamondEnv])
+    const ringEnv = useMemo(() => {
+        const t = ringEnvRaw.clone()
+        t.mapping = THREE.EquirectangularReflectionMapping
+        t.needsUpdate = true
+        return t
+    }, [ringEnvRaw])
+
+    const diamondEnv = useMemo(() => {
+        const t = diamondEnvRaw.clone()
+        t.mapping = THREE.EquirectangularReflectionMapping
+        t.needsUpdate = true
+        return t
+    }, [diamondEnvRaw])
 
     return (
         <>
