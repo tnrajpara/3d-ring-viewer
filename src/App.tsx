@@ -1,4 +1,3 @@
-
 import * as THREE from 'three'
 import { useMemo, Suspense } from 'react'
 import { Canvas, type ThreeElements, useFrame, useThree } from '@react-three/fiber'

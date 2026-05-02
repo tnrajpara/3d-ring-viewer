@@ -24,7 +24,7 @@ type RingNode = {
 
 function Ring({ diamondMap, glbUrl, diamondGltfUrl, metalColor, gemColor, aberration, ...props }: RingProps) {
     const { scene } = useGLTF(glbUrl)
-    const diamondGltf = diamondGltfUrl ? useGLTF(diamondGltfUrl) : null
+    const diamondGltf = useGLTF(diamondGltfUrl)
 
     const { diamonds, metals, autoScale } = useMemo(() => {
         const diamonds: RingNode[] = []
@@ -240,7 +240,7 @@ function Scene() {
                 </group>
             </Suspense>
 
-            <EffectComposer disableNormalPass multisampling={8}>
+            <EffectComposer multisampling={8}>
                 <Bloom luminanceThreshold={1.2} intensity={0.5} levels={8} mipmapBlur />
             </EffectComposer>
         </>
