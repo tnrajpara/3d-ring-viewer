@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { useMemo, Suspense } from 'react'
 import { Canvas, useLoader, type ThreeElements } from '@react-three/fiber'
-import { useGLTF, MeshRefractionMaterial, AccumulativeShadows, RandomizedLight, Environment, OrbitControls, Loader, ContactShadows, Center } from '@react-three/drei'
+import { useGLTF, MeshRefractionMaterial, ContactShadows, Environment, OrbitControls, Loader, Center, useEnvironment } from '@react-three/drei'
 import { EffectComposer, Bloom } from '@react-three/postprocessing'
 import { RGBELoader } from 'three-stdlib'
 import { useControls } from 'leva'
@@ -9,6 +9,7 @@ import { useControls } from 'leva'
 type RingProps = ThreeElements['group'] & {
     diamondMap: THREE.Texture
     glbUrl: string
+    diamondGltfUrl?: string
     metalColor: string
     gemColor: string
     aberration: number
@@ -21,20 +22,34 @@ type RingNode = {
     scale: THREE.Vector3
 }
 
-function Ring({ diamondMap, glbUrl, metalColor, gemColor, aberration, ...props }: RingProps) {
+function Ring({ diamondMap, glbUrl, diamondGltfUrl, metalColor, gemColor, aberration, ...props }: RingProps) {
     const { scene } = useGLTF(glbUrl)
+    const diamondGltf = diamondGltfUrl ? useGLTF(diamondGltfUrl) : null
 
     const { diamonds, metals, autoScale } = useMemo(() => {
         const diamonds: RingNode[] = []
         const metals: RingNode[] = []
 
+        let externalDiamondGeometry: THREE.BufferGeometry | null = null
+        const externalDiamondScale = new THREE.Vector3(1, 1, 1)
+
+        if (diamondGltf) {
+            diamondGltf.scene.traverse((child) => {
+                if ((child as THREE.Mesh).isMesh && !externalDiamondGeometry) {
+                    const mesh = child as THREE.Mesh
+                    externalDiamondGeometry = mesh.geometry
+                    mesh.updateWorldMatrix(true, false)
+                    mesh.matrixWorld.decompose(new THREE.Vector3(), new THREE.Quaternion(), externalDiamondScale)
+                }
+            })
+        }
+
         scene.updateWorldMatrix(true, true)
         scene.traverse((child) => {
+            const name = child.name.toLowerCase()
+
             if ((child as THREE.Mesh).isMesh) {
                 const mesh = child as THREE.Mesh
-                const name = mesh.name.toLowerCase()
-
-                // Decompose world matrix to get flat transform relative to scene root
                 const pos = new THREE.Vector3()
                 const quat = new THREE.Quaternion()
                 const scale = new THREE.Vector3()
@@ -47,24 +62,49 @@ function Ring({ diamondMap, glbUrl, metalColor, gemColor, aberration, ...props }
                     scale: scale
                 }
 
-                if (name.includes('diamond') || name.includes('gem')) {
+                if (name.includes('diamond') || name.includes('gem') || name.includes('stone') || name.includes('rnd')) {
                     diamonds.push(item)
-                } else if (name.includes('metal') || name.includes('ring') || name.includes('gold')) {
+                } else if (name.includes('metal') || name.includes('ring') || name.includes('gold') || name.includes('body')) {
                     metals.push(item)
                 } else {
-                    // Include other meshes as metal by default if they don't match gem patterns
                     metals.push(item)
                 }
+            } else if (name.includes('anchor') && externalDiamondGeometry) {
+                const pos = new THREE.Vector3()
+                const quat = new THREE.Quaternion()
+                const scale = new THREE.Vector3()
+                child.matrixWorld.decompose(pos, quat, scale)
+
+                const finalScale = scale.clone().multiply(externalDiamondScale)
+
+                diamonds.push({
+                    geometry: externalDiamondGeometry,
+                    position: pos,
+                    quaternion: quat,
+                    scale: finalScale
+                })
             }
         })
 
-        const box = new THREE.Box3().setFromObject(scene)
-        const size = box.getSize(new THREE.Vector3())
+        const totalBox = new THREE.Box3()
+        metals.forEach(m => {
+            const b = m.geometry.boundingBox || m.geometry.computeBoundingBox() || m.geometry.boundingBox!
+            totalBox.expandByPoint(new THREE.Vector3().copy(m.position).add(new THREE.Vector3(b.min.x * m.scale.x, b.min.y * m.scale.y, b.min.z * m.scale.z)))
+            totalBox.expandByPoint(new THREE.Vector3().copy(m.position).add(new THREE.Vector3(b.max.x * m.scale.x, b.max.y * m.scale.y, b.max.z * m.scale.z)))
+        })
+        diamonds.forEach(d => {
+            const b = d.geometry.boundingBox || d.geometry.computeBoundingBox() || d.geometry.boundingBox!
+            totalBox.expandByPoint(new THREE.Vector3().copy(d.position).add(new THREE.Vector3(b.min.x * d.scale.x, b.min.y * d.scale.y, b.min.z * d.scale.z)))
+            totalBox.expandByPoint(new THREE.Vector3().copy(d.position).add(new THREE.Vector3(b.max.x * d.scale.x, b.max.y * d.scale.y, b.max.z * d.scale.z)))
+        })
+
+        const size = totalBox.getSize(new THREE.Vector3())
         const maxDim = Math.max(size.x, size.y, size.z)
-        const autoScale = maxDim > 0 ? 2.5 / maxDim : 1
+        const targetSize = 2.0
+        const autoScale = maxDim > 0.0001 ? targetSize / maxDim : 1
 
         return { diamonds, metals, autoScale }
-    }, [scene])
+    }, [scene, diamondGltf])
 
     return (
         <group {...props} dispose={null}>
@@ -77,9 +117,10 @@ function Ring({ diamondMap, glbUrl, metalColor, gemColor, aberration, ...props }
                                 aberrationStrength={aberration}
                                 toneMapped={true}
                                 color={gemColor}
-                                bounces={3}
+                                bounces={4}
                                 ior={2.4}
                                 fresnel={1}
+                                fastChroma={true}
                             />
                         </mesh>
                     ))}
@@ -95,15 +136,14 @@ function Ring({ diamondMap, glbUrl, metalColor, gemColor, aberration, ...props }
                         >
                             <meshPhysicalMaterial
                                 color={metalColor}
-                                roughness={0.02}
+                                roughness={0.01}
                                 metalness={1}
-                                envMapIntensity={1}
+                                envMapIntensity={1.0}
+                                reflectivity={1.0}
                                 clearcoat={1}
                                 clearcoatRoughness={0}
-                                iridescence={0.05}
+                                iridescence={0.02}
                                 iridescenceIOR={1.5}
-                                specularIntensity={2}
-                                reflectivity={1}
                             />
                         </mesh>
                     ))}
@@ -113,22 +153,22 @@ function Ring({ diamondMap, glbUrl, metalColor, gemColor, aberration, ...props }
     )
 }
 
-
-
 function Scene() {
     const { metalColor, gemColor, aberration, model } = useControls({
         model: {
             options: {
+                'Test (Ring + Stones)': "/test.gltf",
                 'Classic Solitaire': '/ring-1.glb',
                 'Modern Band': '/ring.glb',
+                'Stone Only': '/test-diamond.gltf',
             }
         },
         metalColor: {
             label: 'Metal',
             options: {
-                '14k Yellow Gold': '#C5A059',
-                'Rose Gold': 'rgb(224,181,158)',
-                'White Gold': 'rgb(204,204,204)',
+                '14k Yellow Gold': '#D8C08C',
+                'Rose Gold': '#E0B59E',
+                'White Gold': '#CCCCCC',
             }
         },
         gemColor: {
@@ -136,7 +176,7 @@ function Scene() {
             label: 'Gemstone'
         },
         aberration: {
-            value: 0.01,
+            value: 0.02,
             min: 0,
             max: 0.1,
             step: 0.01,
@@ -145,7 +185,6 @@ function Scene() {
     })
 
     const ringEnvRaw = useLoader(RGBELoader, 'final-8.hdr')
-    const diamondEnvRaw = useLoader(RGBELoader, '6.58.hdr')
 
     const ringEnv = useMemo(() => {
         const t = ringEnvRaw.clone()
@@ -154,62 +193,55 @@ function Scene() {
         return t
     }, [ringEnvRaw])
 
-    const diamondEnv = useMemo(() => {
-        const t = diamondEnvRaw.clone()
-        t.mapping = THREE.EquirectangularReflectionMapping
-        t.needsUpdate = true
-        return t
-    }, [diamondEnvRaw])
+    // useEnvironment returns a proper PMREM CubeTexture — what MeshRefractionMaterial actually needs
+    const diamondEnv = useEnvironment({ files: '6.58.hdr' })
+
     return (
         <>
-            <color attach="background" args={['rgb(229,228,226)']} />
-            <ambientLight intensity={0.02} />
-            <spotLight position={[10, 15, 10]} angle={0.3} penumbra={1} intensity={2} castShadow shadow-bias={-0.0001} />
-            <pointLight position={[-10, 10, -10]} intensity={1} color="#ffffff" />
+            <color attach="background" args={['#f0f0f0']} />
+            <ambientLight intensity={0.5} />
+            <spotLight position={[10, 15, 10]} angle={0.3} penumbra={1} intensity={1} castShadow shadow-bias={-0.0001} />
+            <pointLight position={[-10, 10, -10]} intensity={0.5} color="#ffffff" />
 
-            <Environment map={ringEnv} background={false} blur={0} environmentRotation={[0, Math.PI / 4, 0]} />
+            <Environment map={ringEnv} />
 
             <OrbitControls
                 makeDefault
-                enableDamping
-                dampingFactor={0.05}
-                enablePan={false}
                 minDistance={3}
-                maxDistance={10}
+                maxDistance={12}
+                enablePan={false}
+                dampingFactor={0.05}
+                autoRotate
+                autoRotateSpeed={0.5}
+
             />
 
             <Suspense fallback={null}>
-                <group position={[0, 0, 0]}>
+                <group position={[0, -0.5, 0]}>
                     <Ring
                         key={model}
                         diamondMap={diamondEnv}
                         glbUrl={model}
+                        diamondGltfUrl={model === "/test.gltf" ? "/test-diamond.gltf" : undefined}
                         metalColor={metalColor}
                         gemColor={gemColor}
                         aberration={aberration}
-                        rotation={[0, 0, 0]}
                     />
 
                     <ContactShadows
                         resolution={1024}
-                        scale={10}
+                        scale={8}
                         blur={2}
-                        opacity={0.15}
-                        far={1}
+                        opacity={0.2}
+                        far={1.5}
                         color="#000000"
-                        position={[0, -0.85, 0]}
+                        position={[0, -0.01, 0]}
                     />
-
-                    <group position={[0, -0.85, 0]}>
-                        <AccumulativeShadows temporal frames={100} alphaTest={0.95} opacity={0.6} scale={20}>
-                            <RandomizedLight amount={8} radius={10} ambient={0.5} position={[5, 10, -2.5]} bias={0.001} size={3} />
-                        </AccumulativeShadows>
-                    </group>
                 </group>
             </Suspense>
 
-            <EffectComposer enableNormalPass={false}>
-                <Bloom luminanceThreshold={1} intensity={0.75} levels={9} mipmapBlur />
+            <EffectComposer disableNormalPass multisampling={8}>
+                <Bloom luminanceThreshold={1.2} intensity={0.5} levels={8} mipmapBlur />
             </EffectComposer>
         </>
     )
@@ -217,14 +249,15 @@ function Scene() {
 
 export default function App() {
     return (
-        <div className="container">
+        <div className="container" style={{ width: '100vw', height: '100vh', background: '#f0f0f0' }}>
             <Canvas
                 shadows
-                camera={{ position: [5, 3, 5], fov: 35 }}
+                camera={{ position: [0, 2, 8], fov: 20 }}
                 gl={{
                     toneMapping: THREE.ACESFilmicToneMapping,
-                    toneMappingExposure: 1.2,
-                    antialias: true
+                    toneMappingExposure: 1.0,
+                    antialias: true,
+                    preserveDrawingBuffer: true
                 }}
             >
                 <Scene />
