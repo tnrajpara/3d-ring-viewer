@@ -24,7 +24,7 @@ type RingNode = {
 
 function Ring({ diamondMap, glbUrl, diamondGltfUrl, metalColor, gemColor, aberration, ...props }: RingProps) {
     const { scene } = useGLTF(glbUrl)
-    const diamondGltf = useGLTF(diamondGltfUrl)
+    const diamondGltf = useGLTF(diamondGltfUrl || glbUrl)
 
     const { diamonds, metals, autoScale } = useMemo(() => {
         const diamonds: RingNode[] = []
@@ -33,8 +33,8 @@ function Ring({ diamondMap, glbUrl, diamondGltfUrl, metalColor, gemColor, aberra
         let externalDiamondGeometry: THREE.BufferGeometry | null = null
         const externalDiamondScale = new THREE.Vector3(1, 1, 1)
 
-        if (diamondGltf) {
-            diamondGltf.scene.traverse((child) => {
+        if (diamondGltfUrl && diamondGltf && !Array.isArray(diamondGltf)) {
+            diamondGltf.scene.traverse((child: THREE.Object3D) => {
                 if ((child as THREE.Mesh).isMesh && !externalDiamondGeometry) {
                     const mesh = child as THREE.Mesh
                     externalDiamondGeometry = mesh.geometry
